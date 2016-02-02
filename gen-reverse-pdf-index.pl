@@ -86,6 +86,7 @@ else {
 
 #print Dumper(%config);
 
+my @column_reset_lines = ();
 my @column_left = @{$config{column_left}};
 my $avg_indent  = $config{avg_indent};
 my $comma_index = $config{comma_index};;
@@ -94,7 +95,12 @@ my $trust_indent_guess_fully = $config{trust_indent_guess_fully};
 my @marked_lines = @{$config{marked_lines}};
 my @bad_lines = @{$config{bad_lines}};
 
-print Dumper(\@marked_lines);
+if (exists $config{column_reset_lines}) {
+	@column_reset_lines = @{$config{column_reset_lines}};
+}
+
+#print Dumper(\@marked_lines);
+print Dumper(\@column_reset_lines);
 #print "column_left: @column_left, avg_indent: $avg_indent\n";
 #exit 99;
 
@@ -287,6 +293,7 @@ LINE: while (<STDIN>) {
 		$text =~ s/<\/text>//;
 		$text =~ s/<\/*(b|i)>//g;
 		$text =~ s/<a href=.*?>//g;
+		$text =~ s|</a>||g;
 		#print "=> cur_page_line: $cur_page_line, page_height * 0.05: ".($page_height * 0.05)."\n";
 		#if (  $cur_page_line < 20 and ( $left < $column_left[ $even_odd_page][1] or $top < ($page_height * 0.05)) ) { print "BLAAAH\n"; }
 		#if (  $cur_page_line < 20 and ( abs( $left - $column_left[ $even_odd_page][1]) > 10 or $top < ($page_height * 0.05)) ) { print "BLAAAH\n"; }
@@ -324,16 +331,19 @@ LINE: while (<STDIN>) {
 			if ( ($left - $lastleft) > 100 or $page_non_garbage_line == 1) {
 				# New column
 				$cur_column++;
-				# XXX implement new column left setting override %config{column_reset_lines}
-### XXX 				if ( 
-### XXX 				if (exists $strings{$string})
-### XXX 
-### XXX 		foreach my $regex ( @marked_lines) {
-### XXX 			if ( m|$regex|) {
-### XXX 				print "=> MATCHES: '$regex'\n";
-### XXX 				$marked_line = 1;
-### XXX 			}
-### XXX 		}
+				
+				# Reset the new column back to what they're supposed to be:
+				@column_left = @{$config{column_left}};
+
+				# implement new column left setting override %config{column_reset_lines}
+				# This is to temporarily reset the column left value for a column that
+				# is not where it supposed to be due to formatting issues.
+				foreach my $regex ( @column_reset_lines) {
+					if ( m|$regex|) {
+						print "=> COLUMN RESET LINE MATCHES: '$regex'\n";
+						$column_left[ $even_odd_page][ $cur_column] = $left;
+					}
+				}
 
 				my $expected_left = $column_left[ $even_odd_page][ $cur_column];
 				#my $indent_guess = sprintf( "%.0f", ($left - $expected_left) / $avg_indent);
@@ -436,13 +446,17 @@ LINE: while (<STDIN>) {
 			if    ( $isindent == 2 ) { $itemheading3  = $itemtext; }
 		}
 		# If start of this line is within 5 pix radius of end of last line assume it's continuation
-		elsif (abs( $top - $lasttop) < 7 and abs( $left - ($lastleft + $lastwidth)) < 5 ) {
+		elsif (abs( $top - $lasttop) < 10 and abs( $left - ($lastleft + $lastwidth)) < 5 ) {
 			print "=> CONTINUATION OF UNFINISHED LINE\n";
 			# Do same as LONE PAGENO below
 			$isindent = $last_indent; 
 			# XXX
-			#$text = "$lasttext $text";
-			$text = "$lasttext$text";
+			# Most likely a Vitamin B_6 subscript?
+			if ( $text =~ m/^\d\d$/ ) { $text = "$lasttext$text"; }
+			# Else continuation of page nos listing
+			elsif ( $text =~ m/^\d[\s\d,]+$/ ) { $text = "$lasttext $text"; }
+			# Something else
+			else { $text = "$lasttext$text"; }
 			print "=> REVERTED TO: $text\n";
 			$marked_line = $last_marked;
 			
@@ -490,7 +504,9 @@ LINE: while (<STDIN>) {
 		}
 
 		# Edge case like: Blahitem[,] 10[,]\n12, 14\n
-		if ( $isindent == 0 and $lasttext =~ m|\d,*$| and $text =~ m|^\d[\s\d,]+|) {
+		if ( $isindent == 0 and 
+			( $lasttext =~ m|\d,*$| or $lasttext =~ m|,$| )
+			and $text =~ m|^\d[\s\d,]+|) {
 			print "=> CONTINUATION OF PAGE NOS W/O INDENT, BAD!: $text\n";
 			if ( $lasttext =~ m|,$|) { $text = "$lasttext $text" }
 			else { $text = "$lasttext, $text"; }
