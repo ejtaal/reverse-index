@@ -10,6 +10,7 @@ trust_indent_guess_fully => 1,
 # Yeah pdftohtml works a bit weird, 14 is normal 13 bold for this book :-??!
 #marked_lines => [ 'height="13"', 'height="16"' ],
 marked_lines => [ 'font="10"><b>' ],
+#bad_lines => [ 'font="0">','mainly, or wholly, in a ﬁgure or','Entries and page numbers in' ],
 bad_lines => [ 'font="0">' ],
 #marked_lines => qw{
 #	'height="13"'

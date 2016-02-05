@@ -107,6 +107,7 @@ print Dumper(\@column_reset_lines);
 my $page_items;
 my $marked_line = 0;
 my $last_marked = 0;
+my $no_pagenos_in_previous_line = 0;
 
 sub extract_page_numbers {
 	#print "1 = [$1]\n";
@@ -325,6 +326,9 @@ LINE: while (<STDIN>) {
 		#}
 
 
+		# To be set if line is being reverted, to stop it happening twice in a row
+		my $just_joined = 0;
+
 		# New column or page?
 		#print "=> lasttop: $lasttop, top: $top, lastleft: $lastleft, left: $left\n";
 		if ( ( $lasttop - $top) > 250 or $page_non_garbage_line == 1) {
@@ -427,6 +431,16 @@ LINE: while (<STDIN>) {
 		#      regular new line              already indented before && now unindented
 		elsif (abs( $top - $lasttop) < 50 && $isindent > 0 && ($lastleft - $left) > 5) {
 			#print "\nNEW LINE / HEADING: $text\n";
+			
+			# Could be unindent after a new column had started with an indent. Thus
+			# check again for possible column RESET lines
+			foreach my $regex ( @column_reset_lines) {
+				if ( m|$regex|) {
+					print "=> COLUMN RESET LINE MATCHES: '$regex'\n";
+					$column_left[ $even_odd_page][ $cur_column] = $left;
+				}
+			}
+
 			my $unindents = sprintf( "%.0f", ($lastleft - $left) / $avg_indent);
 			
 			my $expected_left = $column_left[ $even_odd_page][ $cur_column];
@@ -458,6 +472,7 @@ LINE: while (<STDIN>) {
 			# Something else
 			else { $text = "$lasttext$text"; }
 			print "=> REVERTED TO: $text\n";
+			$just_joined = 1;
 			$marked_line = $last_marked;
 			
 			# Fix all indent headers:
@@ -493,23 +508,60 @@ LINE: while (<STDIN>) {
 		#if ( $text =~ m|^[,\s\d]+$| ) {
 		# Starts with numbers but that could also be part of the heading itself, or molecule name
 		#    indent detected   starts w numbers    doesn't end with page no's        isn't name of molecule
-		if ( $isindent > 0 and $text =~ m|^\d| and $text !~ m|[A-Za-z]{2,}.*?,\s*\d| and $text !~ m|^\d+,\d+[A-Za-z]|) {
+
+		if ( $isindent > 0 and $text =~ m|^\d| 
+			and $text !~ m|[A-Za-z]{2,}.*?,\s*\d| 
+			and $text !~ m|^\d+,\d+[A-Za-z]| 
+			and $text !~  m|^\d+\.\d+\s+| 
+			and $text !~  m|^\d+-\w| 
+			) {
 			print "=> LONE PAGENO LINE: $text\n";
 			$isindent = $last_indent; 
-			$text = "$lasttext, $text";
-			print "=> Reverted to: $text\n";
+			if    ( $comma_index == 1 ) { $text = "$lasttext, $text"; }
+			elsif ( $space_index == 1 ) { $text = "$lasttext $text"; }
+			print "=> REVERTED TO: $text\n";
+			$just_joined = 1;
 			# To stop routine above thinking it's a new line / new heading:
 			$left = $lastleft;
 			$top = $lasttop;
+			print "=> ITEMTEXT: $itemtext\n";
+			# Fix all indent headers:
+			if    ( $comma_index == 1 and $text =~ m|^(.*?),\s*\d| ) { $itemtext = $1; }
+			#elsif ( $space_index == 1 and $text =~ m|^(.*?)\s+\d+[-–\s,]| ) { print "BLAH"; $itemtext = $1; }
+			elsif ( $space_index == 1 and $text =~ m|^(.*?)\s+\d+[-–\s\d,]+$| ) { $itemtext = $1; }
+			else { $itemtext = $text; }
+			if    ( $isindent == 0 ) { $itemheading   = $itemtext; }
+			if    ( $isindent == 1 ) { $itemheading2  = $itemtext; }
+			if    ( $isindent == 2 ) { $itemheading3  = $itemtext; }
+			print "=> ITEMTEXT: $itemtext\n";
+		}
+
+		if ($last_indent > 0 and $last_indent == $isindent and $no_pagenos_in_previous_line == 1 and $just_joined == 0) {
+			print "=> JOIN UNFINISHED SUBHEADING\n";
+			if    ( $comma_index == 1 ) { $text = "$lasttext, $text"; }
+			elsif ( $space_index == 1 ) { $text = "$lasttext $text"; }
+			print "=> Reverted to: $text\n";
+			# Fix all indent headers:
+			if    ( $comma_index == 1 and $text =~ m|^(.*?),\s*\d| ) { $itemtext = $1; }
+			elsif ( $space_index == 1 and $text =~ m|^(.*?)\s+\d+[-–\s,]| ) { $itemtext = $1; }
+			elsif ( $space_index == 1 and $text =~ m|^(.*?)\s+\d+[-–\s\d,]+$| ) { $itemtext = $1; }
+			else { $itemtext = $text; }
+			if    ( $isindent == 0 ) { $itemheading   = $itemtext; }
+			if    ( $isindent == 1 ) { $itemheading2  = $itemtext; }
+			if    ( $isindent == 2 ) { $itemheading3  = $itemtext; }
 		}
 
 		# Edge case like: Blahitem[,] 10[,]\n12, 14\n
 		if ( $isindent == 0 and 
-			( $lasttext =~ m|\d,*$| or $lasttext =~ m|,$| )
-			and $text =~ m|^\d[\s\d,]+|) {
+			( $lasttext =~ m|\d,*$| or $lasttext =~ m|,$| or $no_pagenos_in_previous_line == 1)  # XXX Or last was bold perhaps as well?
+			and $text =~ m|^\d[-–\s\d,]+| 
+			and ($text !~ m|^\d+\s+\w+,\s*\d+$| 
+			and $text !~  m|^\d+-\w| 
+			) ) {
 			print "=> CONTINUATION OF PAGE NOS W/O INDENT, BAD!: $text\n";
 			if ( $lasttext =~ m|,$|) { $text = "$lasttext $text" }
-			else { $text = "$lasttext, $text"; }
+			elsif ( $comma_index == 1) { $text = "$lasttext, $text" }
+			else { $text = "$lasttext $text"; }
 			print "=> Reverted to: $text\n";
 			# Fix all indent headers:
 			if    ( $comma_index == 1 and $text =~ m|^(.*?),\s*\d| ) { $itemtext = $1; }
@@ -524,16 +576,20 @@ LINE: while (<STDIN>) {
 		# Got page numbers?
 		if ( $text =~ m|\d+| ) { 
 			#print "NUM";
-			if    ( $isindent == 3) { extract_page_numbers( $text, $itemheading, $itemheading2, $itemheading3) }
-			elsif    ( $isindent == 2) { extract_page_numbers( $text, $itemheading, $itemheading2) }
-			elsif ( $isindent == 1) { extract_page_numbers( $text, $itemheading, "") }
-			else                    { extract_page_numbers( $text, "", "") }
-			}
+			my $retval = 0;
+			if    ( $isindent == 3) { $retval = extract_page_numbers( $text, $itemheading, $itemheading2, $itemheading3) }
+			elsif ( $isindent == 2) { $retval =  extract_page_numbers( $text, $itemheading, $itemheading2) }
+			elsif ( $isindent == 1) { $retval =  extract_page_numbers( $text, $itemheading, "") }
+			else                    { $retval =  extract_page_numbers( $text, "", "") }
+			$no_pagenos_in_previous_line = $retval;
+		}
 		# no numbers found, could be a heading, or redirect?
 		elsif ( $text =~ m|See\s| ) {
 			# index item that 'redirects', ignore it
 			print "=> REDIRECT: 'See' detected\n";
 			$redirect = 1; 
+		} else {
+			$no_pagenos_in_previous_line = 1;
 		}
 		$lasttop = $top;
 		$lastleft = $left;

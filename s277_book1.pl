@@ -9,6 +9,7 @@ trust_indent_guess_fully => 1,
 #marked_lines => [ 'height="13"', 'height="16"' ],
 marked_lines => [ 'font="6"', '<b>' ],
 bad_lines => [ 'font="23"' ],
+column_reset_lines => ['gastritis 155','habitats 17'],
 #marked_lines => qw{
 #	'height="13"'
 #	'height="16"'
